@@ -1,8 +1,9 @@
 import requests
 import pickle
 import os
-import urllib.parse  # To safely encode the set name
-import re  # For removing alphabetical characters from part numbers
+import urllib.parse
+import re
+import csv
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -10,7 +11,7 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import PATH, API_KEY, SET_NAME, COOKIES_FILE, SELENIUM_OPTIONS, USER_AGENT, PART_PRICE_LABELS, MAX_WORKERS, \
-    SET_NUMBER
+    SET_NUMBER, CSV_FILE
 
 PART_NUMBERS = []
 
@@ -83,12 +84,12 @@ def get_lego_set_parts(set_name, set_number=None):
 
             for part in parts:
                 part_num = part['part']['part_num']
+                quantity = part['quantity']  # Fetch the quantity required for the set
 
                 cleaned_part_num = re.sub(r'\D', '', part_num)
 
                 if cleaned_part_num:
-                    PART_NUMBERS.append(cleaned_part_num)
-
+                    PART_NUMBERS.append((cleaned_part_num, quantity))  # Store part number and quantity as a tuple
 
         else:
             print(f"Failed to fetch parts. Status code: {response.status_code}")
@@ -156,6 +157,28 @@ def fetch_part_price(part_id):
     else:
         return None
 
+def save_to_csv(part_id, part_data, quantity, csv_file=CSV_FILE):
+    file_exists = os.path.isfile(csv_file)
+
+    with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+
+        if not file_exists:
+            writer.writerow(['Part ID', 'Quantity Needed', 'Min Price', 'Avg Price', 'Max Price'])
+
+        # Clean each part of the data by replacing non-breaking spaces with regular spaces
+        row = [
+            part_id,
+            quantity,
+            part_data.get('Min Price:', 'N/A').replace('\xa0', ' '),
+            part_data.get('Avg Price:', 'N/A').replace('\xa0', ' '),
+            part_data.get('Max Price:', 'N/A').replace('\xa0', ' ')
+        ]
+
+        writer.writerow(row)
+
+
+
 
 def main():
     get_lego_set_parts(SET_NAME)  # pass SET_NUMBER as an argument if you know the exact SET_NUMBER
@@ -170,20 +193,22 @@ def main():
             print("Cookies file already exists. Skipping login.")
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            future_to_part = {executor.submit(fetch_part_price, part): part for part in PART_NUMBERS}
+            future_to_part = {executor.submit(fetch_part_price, part[0]): part for part in PART_NUMBERS}
 
             for future in tqdm(as_completed(future_to_part), total=len(future_to_part)):
-                part = future_to_part[future]
+                part, quantity = future_to_part[future]
                 try:
-                    table = future.result()
-                    if table:
-                        print(f"Part {part}: {table}\n")
+                    part_data = future.result()
+                    if part_data:
+                        print(f"Part {part}: {part_data}\n")
+                        save_to_csv(part, part_data, quantity)  # Pass quantity to save_to_csv
                     else:
                         print(f"Failed to fetch price for part {part}")
                 except Exception as exc:
                     print(f"Part {part} generated an exception: {exc}")
     else:
         print("Fetching parts for this LEGO set failed, please retry")
+
 
 
 if __name__ == "__main__":
