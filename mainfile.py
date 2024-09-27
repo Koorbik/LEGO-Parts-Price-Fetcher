@@ -157,30 +157,37 @@ def fetch_part_price(part_id):
     else:
         return None
 
+
 def save_to_csv(part_id, part_data, quantity, csv_file=CSV_FILE):
     file_exists = os.path.isfile(csv_file)
 
     with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
+        writer = csv.writer(file, delimiter=';')
 
         if not file_exists:
+            # Writing header if file doesn't exist
             writer.writerow(['Part ID', 'Quantity Needed', 'Min Price', 'Avg Price', 'Max Price'])
 
         # Clean each part of the data by replacing non-breaking spaces with regular spaces
+        min_price = part_data.get('Min Price:', 'N/A').replace('\xa0', ' ') if part_data else 0
+        avg_price = part_data.get('Avg Price:', 'N/A').replace('\xa0', ' ') if part_data else 0
+        max_price = part_data.get('Max Price:', 'N/A').replace('\xa0', ' ') if part_data else 0
+
         row = [
             part_id,
             quantity,
-            part_data.get('Min Price:', 'N/A').replace('\xa0', ' '),
-            part_data.get('Avg Price:', 'N/A').replace('\xa0', ' '),
-            part_data.get('Max Price:', 'N/A').replace('\xa0', ' ')
+            min_price,
+            avg_price,
+            max_price
         ]
 
         writer.writerow(row)
 
 
-
-
 def main():
+    if os.path.exists(CSV_FILE):
+        os.remove(CSV_FILE)
+
     get_lego_set_parts(SET_NAME)  # pass SET_NUMBER as an argument if you know the exact SET_NUMBER
     if PART_NUMBERS:
         if not os.path.exists(COOKIES_FILE):
@@ -201,14 +208,14 @@ def main():
                     part_data = future.result()
                     if part_data:
                         print(f"Part {part}: {part_data}\n")
-                        save_to_csv(part, part_data, quantity)  # Pass quantity to save_to_csv
                     else:
                         print(f"Failed to fetch price for part {part}")
+                    save_to_csv(part, part_data, quantity)
                 except Exception as exc:
                     print(f"Part {part} generated an exception: {exc}")
+                    save_to_csv(part, None, quantity)
     else:
         print("Fetching parts for this LEGO set failed, please retry")
-
 
 
 if __name__ == "__main__":
