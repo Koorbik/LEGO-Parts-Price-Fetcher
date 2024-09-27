@@ -169,9 +169,9 @@ def save_to_csv(part_id, part_data, quantity, csv_file=CSV_FILE):
             writer.writerow(['Part ID', 'Quantity Needed', 'Min Price', 'Avg Price', 'Max Price'])
 
         # Clean each part of the data by replacing non-breaking spaces with regular spaces
-        min_price = part_data.get('Min Price:', 'N/A').replace('\xa0', ' ') if part_data else 0
-        avg_price = part_data.get('Avg Price:', 'N/A').replace('\xa0', ' ') if part_data else 0
-        max_price = part_data.get('Max Price:', 'N/A').replace('\xa0', ' ') if part_data else 0
+        min_price = part_data.get('Min Price:', 'N/A').replace('\xa0', ' ').replace('.', ',') if part_data else 0
+        avg_price = part_data.get('Avg Price:', 'N/A').replace('\xa0', ' ').replace('.', ',') if part_data else 0
+        max_price = part_data.get('Max Price:', 'N/A').replace('\xa0', ' ').replace('.', ',') if part_data else 0
 
         row = [
             part_id,
@@ -182,6 +182,51 @@ def save_to_csv(part_id, part_data, quantity, csv_file=CSV_FILE):
         ]
 
         writer.writerow(row)
+
+
+def calculate_total_price():
+    total_min_price = 0
+    total_avg_price = 0
+    total_max_price = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_part = {executor.submit(fetch_part_price, part[0]): part for part in PART_NUMBERS}
+
+        for future in tqdm(as_completed(future_to_part), total=len(future_to_part)):
+            part, quantity = future_to_part[future]
+            try:
+                part_data = future.result()
+                if part_data:
+                    min_price = part_data.get('Min Price:', '0').replace('PLN\xa0', ' ')
+                    avg_price = part_data.get('Avg Price:', '0').replace('PLN\xa0', ' ')
+                    max_price = part_data.get('Max Price:', '0').replace('PLN\xa0', ' ')
+
+                    min_price_value = float(min_price) if min_price != 'N/A' else 0
+                    avg_price_value = float(avg_price) if avg_price != 'N/A' else 0
+                    max_price_value = float(max_price) if max_price != 'N/A' else 0
+
+                    total_min_price += min_price_value * quantity
+                    total_avg_price += avg_price_value * quantity
+                    total_max_price += max_price_value * quantity
+                else:
+                    print(f"Failed to fetch price for part {part}, defaulting to 0")
+            except Exception as exc:
+                print(f"Part {part} generated an exception: {exc}")
+
+    return total_min_price, total_avg_price, total_max_price
+
+
+def save_totals_to_csv(total_min_price, total_avg_price, total_max_price, csv_file=CSV_FILE):
+    total_min_price = str(total_min_price).replace('.', ',')
+    total_avg_price = str(total_avg_price).replace('.', ',')
+    total_max_price = str(total_max_price).replace('.', ',')
+
+    with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file, delimiter=';')
+
+        writer.writerow([])  # Add an empty row for spacing
+        writer.writerow(['Total Min Price', 'Total Avg Price', 'Total Max Price'])
+        writer.writerow([total_min_price, total_avg_price, total_max_price])
 
 
 def main():
@@ -206,14 +251,19 @@ def main():
                 part, quantity = future_to_part[future]
                 try:
                     part_data = future.result()
-                    if part_data:
-                        print(f"Part {part}: {part_data}\n")
-                    else:
-                        print(f"Failed to fetch price for part {part}")
+                    # Uncomment parts below to have exact part data written in the terminal
+                    #if part_data:
+                      #  print(f"Part {part}: {part_data}\n")
+                   # else:
+                     #   print(f"Failed to fetch price for part {part}")
                     save_to_csv(part, part_data, quantity)
                 except Exception as exc:
                     print(f"Part {part} generated an exception: {exc}")
                     save_to_csv(part, None, quantity)
+
+        total_min_price, total_avg_price, total_max_price = calculate_total_price()
+
+        save_totals_to_csv(total_min_price, total_avg_price, total_max_price)
     else:
         print("Fetching parts for this LEGO set failed, please retry")
 

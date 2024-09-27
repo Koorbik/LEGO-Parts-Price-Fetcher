@@ -3,7 +3,7 @@ PATH = "C:\\Program Files (x86)\\chromedriver.exe"
 
 # Rebrickable API Key (PROVIDE YOUR OWN API KEY)
 # https://rebrickable.com/api/
-API_KEY = 'your_rebrickable_api_key'
+API_KEY = 'your_rebrickable_key'
 
 # Default LEGO set name
 SET_NAME = "Stitch"
