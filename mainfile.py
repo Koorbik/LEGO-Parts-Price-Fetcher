@@ -7,11 +7,12 @@ import csv
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import PATH, API_KEY, SET_NAME, COOKIES_FILE, SELENIUM_OPTIONS, USER_AGENT, PART_PRICE_LABELS, MAX_WORKERS, \
-    SET_NUMBER, CSV_FILE
+    CSV_FILE
 
 PART_NUMBERS = []
 
@@ -72,33 +73,55 @@ def search_lego_set_by_name(set_name):
 
 def get_lego_set_parts(set_name, set_number=None):
     if set_number is not None:
-        url = f"https://rebrickable.com/api/v3/lego/sets/{set_number}/parts/"
         headers = {'Authorization': f'key {API_KEY}'}
+        page = 1
+        page_size = 100  # The API might limit the number of results per page (e.g., 100)
 
-        # Make the API request to get parts
-        response = requests.get(url, headers=headers)
+        while True:
+            url = f"https://rebrickable.com/api/v3/lego/sets/{set_number}/parts/?page={page}&page_size={page_size}"
 
-        if response.status_code == 200:
-            data = response.json()
-            parts = data['results']
+            response = requests.get(url, headers=headers)
 
-            for part in parts:
-                part_num = part['part']['part_num']
-                quantity = part['quantity']  # Fetch the quantity required for the set
+            if response.status_code == 200:
+                data = response.json()
+                parts = data['results']
 
-                cleaned_part_num = re.sub(r'\D', '', part_num)
+                if not parts:
+                    # No more parts to fetch, stop the loop
+                    break
 
-                if cleaned_part_num:
-                    PART_NUMBERS.append((cleaned_part_num, quantity))  # Store part number and quantity as a tuple
+                for part in parts:
+                    part_num = part['part']['part_num']
+                    quantity = part['quantity']  # Fetch the quantity required for the set
 
-        else:
-            print(f"Failed to fetch parts. Status code: {response.status_code}")
+                    cleaned_part_num = re.sub(r'\D', '', part_num)
+
+                    if cleaned_part_num:
+                        PART_NUMBERS.append((cleaned_part_num, quantity))  # Store part number and quantity as a tuple
+
+                # If there's another page, increment the page number
+                if data['next']:
+                    page += 1
+                else:
+                    break
+            else:
+                print(f"Failed to fetch parts. Status code: {response.status_code}")
+                break
     else:
         lego_set = search_lego_set_by_name(set_name)
 
         if lego_set:
             set_number = lego_set['set_num']
+            set_name = lego_set['name']
             print(f"Found set: {lego_set['name']} (Set Number: {set_number})")
+
+            try:
+                get_lego_set_price_and_save_to_csv(set_name, set_number)
+            except Exception:
+                print(f"Failed to fetch LEGO set price for {set_name}\n")
+                print("Proceeding with fetching prices for parts")
+                # Continue with fetching parts even if the price fetch fails
+
             get_lego_set_parts(lego_set['name'], set_number)
         else:
             print(f"Could not find any set with the name: {set_name}")
@@ -209,7 +232,7 @@ def calculate_total_price():
                     total_avg_price += avg_price_value * quantity
                     total_max_price += max_price_value * quantity
                 else:
-                    print(f"Failed to fetch price for part {part}, defaulting to 0")
+                    print(f"\nFailed to fetch price for part {part}, defaulting to 0")
             except Exception as exc:
                 print(f"Part {part} generated an exception: {exc}")
 
@@ -229,11 +252,38 @@ def save_totals_to_csv(total_min_price, total_avg_price, total_max_price, csv_fi
         writer.writerow([total_min_price, total_avg_price, total_max_price])
 
 
+def get_lego_set_price_and_save_to_csv(set_name, set_number, csv_file=CSV_FILE):
+    driver = create_driver()
+    cleaned_set_name = set_name.replace(" ", "-")
+    if "-" in set_number:
+        cleaned_set_number = set_number.split("-")[0]
+    else:
+        cleaned_set_number = set_number
+
+    driver.get(f"https://www.lego.com/pl-pl/product/{cleaned_set_name}-{cleaned_set_number}")
+
+    try:
+        price_element = driver.find_element(By.XPATH,
+                                            '//*[@id="main-content"]/div/div[1]/div/div[2]/div[2]/div[2]/div/span')
+        price = price_element.text
+
+        with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file, delimiter=';')
+
+            writer.writerow([])
+            writer.writerow(['Lego Set Price'])
+            writer.writerow([price])
+            writer.writerow([])
+    finally:
+        driver.quit()
+
+
 def main():
     if os.path.exists(CSV_FILE):
         os.remove(CSV_FILE)
 
-    get_lego_set_parts(SET_NAME)  # pass SET_NUMBER as an argument if you know the exact SET_NUMBER
+    get_lego_set_parts(SET_NAME)
+
     if PART_NUMBERS:
         if not os.path.exists(COOKIES_FILE):
             driver = create_driver()
@@ -251,11 +301,6 @@ def main():
                 part, quantity = future_to_part[future]
                 try:
                     part_data = future.result()
-                    # Uncomment parts below to have exact part data written in the terminal
-                    #if part_data:
-                      #  print(f"Part {part}: {part_data}\n")
-                   # else:
-                     #   print(f"Failed to fetch price for part {part}")
                     save_to_csv(part, part_data, quantity)
                 except Exception as exc:
                     print(f"Part {part} generated an exception: {exc}")

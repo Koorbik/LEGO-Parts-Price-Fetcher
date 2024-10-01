@@ -6,9 +6,7 @@ PATH = "C:\\Program Files (x86)\\chromedriver.exe"
 API_KEY = 'your_rebrickable_key'
 
 # Default LEGO set name
-SET_NAME = "Stitch"
-
-SET_NUMBER = ""
+SET_NAME = "tuxedo cat"
 
 # File path for cookies
 COOKIES_FILE = "cookies.pkl"
@@ -22,7 +20,6 @@ MAX_WORKERS = 10
 SELENIUM_OPTIONS = [
     "--disable-extensions",
     "--disable-infobars",
-    "--start-maximized",
     "--disable-gpu",
     "--no-sandbox",
     "--disable-dev-shm-usage"
